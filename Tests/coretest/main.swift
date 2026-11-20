@@ -1,0 +1,114 @@
+import Foundation
+
+let fm = FileManager.default
+let root = URL(fileURLWithPath: NSTemporaryDirectory() + "BPMCoreTest-\(UUID().uuidString)")
+try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+func touch(_ rel: String) {
+    let url = root.appendingPathComponent(rel)
+    try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    fm.createFile(atPath: url.path, contents: Data("x".utf8))
+}
+func exists(_ rel: String) -> Bool {
+    fm.fileExists(atPath: root.appendingPathComponent(rel).path)
+}
+
+// 根目录：A 有 JPG 匹配，B 无匹配，C 大小写不同也算匹配
+touch("IMG_A.CR3"); touch("IMG_A.JPG")
+touch("IMG_B.CR3")
+touch("img_c.cr3"); touch("IMG_C.jpg")
+// 子目录：D 无匹配
+touch("sub/IMG_D.NEF")
+// 一个 JPG 单独存在
+touch("sub/SOLO.JPG")
+
+let mgr = PhotoManager()
+mgr.setRoot(root)
+
+func check(_ cond: Bool, _ msg: String) {
+    print("\(cond ? "PASS" : "FAIL"): \(msg)")
+    if !cond { exit(1) }
+}
+
+check(mgr.stats.dirCount == 2, "扫描到 2 个文件夹（根目录 + sub），实际 \(mgr.stats.dirCount)")
+check(mgr.stats.rawCount == 4, "RAW 共 4 个，实际 \(mgr.stats.rawCount)")
+check(mgr.stats.jpgCount == 3, "JPG 共 3 个，实际 \(mgr.stats.jpgCount)")
+check(mgr.stats.matchedRawCount == 2, "匹配 RAW 共 2 个（A、C），实际 \(mgr.stats.matchedRawCount)")
+check(mgr.stats.unmatchedRawCount == 2, "无匹配 RAW 共 2 个（B、D），实际 \(mgr.stats.unmatchedRawCount)")
+
+// 任务1：移出无匹配 RAW
+let plan1 = mgr.preview(for: .unmatchedRaw)
+check(plan1.count == 2, "任务1 预览 2 个文件，实际 \(plan1.count)")
+let r1 = mgr.run(.unmatchedRaw)
+check(r1.succeeded == 2 && r1.failed == 0, "任务1 移动成功 2 个，实际 \(r1.succeeded)/\(r1.failed)")
+check(exists("无同名JPG的RAW/IMG_B.CR3"), "IMG_B.CR3 移入根目录的无匹配目录")
+check(exists("sub/无同名JPG的RAW/IMG_D.NEF"), "IMG_D.NEF 移入 sub 的无匹配目录")
+check(!exists("IMG_B.CR3") && !exists("sub/IMG_D.NEF"), "源文件已移走")
+
+// 撤销
+let u1 = mgr.undoLast()
+check(u1.restored == 4 && u1.failed == 0, "撤销恢复 4 项（2 移动 + 2 空目录），实际 \(u1.restored)/\(u1.failed)")
+check(exists("IMG_B.CR3"), "IMG_B.CR3 撤销后回到根目录")
+check(exists("sub/IMG_D.NEF"), "IMG_D.NEF 撤销后回到 sub")
+
+// 任务3：当前目录匹配 RAW
+let plan3 = mgr.preview(for: .matchedRawCurrent)
+check(plan3.count == 2, "任务3 当前目录匹配 RAW 2 个（A、C，大小写不敏感），实际 \(plan3.count)")
+let r3 = mgr.run(.matchedRawCurrent)
+check(r3.succeeded == 2, "任务3 成功 2 个，实际 \(r3.succeeded)")
+check(exists("当前目录同名JPG的RAW/IMG_A.CR3"), "IMG_A.CR3 进入匹配目录")
+check(exists("当前目录同名JPG的RAW/img_c.cr3"), "img_c.cr3 进入匹配目录")
+
+// 任务2：汇总全部 RAW（复制）—— 2 个匹配 RAW 已进入生成目录，会被跳过，剩 IMG_B + IMG_D
+let plan2 = mgr.preview(for: .allRaw)
+check(plan2.count == 2, "任务2 复制全部 RAW 2 个（跳过生成目录），实际 \(plan2.count)")
+let r2 = mgr.run(.allRaw)
+check(r2.succeeded == 2, "任务2 复制成功 2 个，实际 \(r2.succeeded)")
+check(exists("IMG_B.CR3"), "复制模式下原文件仍保留")
+check(exists("全部RAW/IMG_B.CR3"), "复制产物进入全部RAW目录")
+
+// ============ 删除任务测试（独立干净目录）============
+let uuid = UUID().uuidString.prefix(8)
+let root2 = URL(fileURLWithPath: NSTemporaryDirectory() + "BPMTrashTest-\(uuid)")
+try fm.createDirectory(at: root2, withIntermediateDirectories: true)
+func touch2(_ rel: String) {
+    let url = root2.appendingPathComponent(rel)
+    try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    fm.createFile(atPath: url.path, contents: Data("y".utf8))
+}
+func exists2(_ rel: String) -> Bool { fm.fileExists(atPath: root2.appendingPathComponent(rel).path) }
+
+// 根目录：DEL_A 有 RAW+JPG（保留）；DEL_B 只有 RAW（应删）；DEL_SOLO 只有 JPG（应删）
+touch2("DEL_A.CR3"); touch2("DEL_A.JPG")
+touch2("DEL_B.CR3")
+touch2("sub/DEL_SOLO.JPG")
+
+let mgr2 = PhotoManager()
+mgr2.setRoot(root2)
+check(mgr2.stats.orphanJpgCount == 1, "无同名 RAW 的 JPG 1 个（DEL_SOLO），实际 \(mgr2.stats.orphanJpgCount)")
+
+// 删除无同名 JPG 的 RAW
+let pDelRaw = mgr2.preview(for: .deleteUnmatchedRaw)
+check(pDelRaw.count == 1, "删除任务预览 1 个 RAW（DEL_B），实际 \(pDelRaw.count)")
+let rDelRaw = mgr2.run(.deleteUnmatchedRaw)
+check(rDelRaw.succeeded == 1 && rDelRaw.isTrash, "删除 RAW 成功 1 个且标记为废纸篓，实际 \(rDelRaw.succeeded)")
+check(!exists2("DEL_B.CR3"), "DEL_B.CR3 已从原位置消失（进了废纸篓）")
+check(exists2("DEL_A.CR3"), "有匹配的 DEL_A.CR3 未被删除")
+
+// 撤销删除：从废纸篓搬回
+let uDel = mgr2.undoLast()
+check(uDel.trashedRestored == 1 && uDel.failed == 0, "撤销从废纸篓搬回 1 个，实际 \(uDel.trashedRestored)/\(uDel.failed)")
+check(exists2("DEL_B.CR3"), "DEL_B.CR3 撤销后回到原位置")
+
+// 删除无同名 RAW 的 JPG
+let pDelJpg = mgr2.preview(for: .deleteOrphanJpg)
+check(pDelJpg.count == 1, "删除任务预览 1 个 JPG（DEL_SOLO），实际 \(pDelJpg.count)")
+let rDelJpg = mgr2.run(.deleteOrphanJpg)
+check(rDelJpg.succeeded == 1, "删除 JPG 成功 1 个，实际 \(rDelJpg.succeeded)")
+check(!exists2("sub/DEL_SOLO.JPG"), "DEL_SOLO.JPG 已从原位置消失")
+let uDel2 = mgr2.undoLast()
+check(uDel2.trashedRestored == 1 && exists2("sub/DEL_SOLO.JPG"), "撤销后 DEL_SOLO.JPG 回到 sub")
+
+print("ALL DONE. root=\(root.path) root2=\(root2.path)")
+try? fm.removeItem(at: root)
+try? fm.removeItem(at: root2)
