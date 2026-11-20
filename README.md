@@ -6,7 +6,7 @@
 
 ## 快速开始
 
-1. 从本仓库 [Releases](../../releases) 下载 `批量管理照片软件-v1.0-arm64.zip`；
+1. 从本仓库 [Releases](../../releases) 下载 `BatchPhotoManager-v1.0-arm64.zip`（解压后即「批量管理照片软件.app」）；
 2. 解压得到 `批量管理照片软件.app`，拖进「应用程序」或直接双击运行；
 3. 若首次打开被系统拦截（提示"无法验证开发者"或"已损坏"），在终端执行 once：
    ```bash
