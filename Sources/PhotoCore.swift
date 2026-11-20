@@ -63,13 +63,12 @@ enum TaskGroup: String, CaseIterable, Identifiable {
     }
 }
 
+/// 整理操作：只描述「做什么」，处理范围（是否含子文件夹）由全局开关决定，不再枚举组合。
 enum PhotoTask: String, CaseIterable, Identifiable {
-    case unmatchedRaw
+    case matchedRaw
     case allRaw
-    case matchedRawCurrent
-    case matchedRawRecursive
-    case jpgCurrent
-    case jpgRecursive
+    case unmatchedRaw
+    case jpg
     case deleteUnmatchedRaw
     case deleteOrphanJpg
 
@@ -77,8 +76,8 @@ enum PhotoTask: String, CaseIterable, Identifiable {
 
     var group: TaskGroup {
         switch self {
-        case .unmatchedRaw, .allRaw, .matchedRawCurrent, .matchedRawRecursive: return .raw
-        case .jpgCurrent, .jpgRecursive: return .jpg
+        case .unmatchedRaw, .allRaw, .matchedRaw: return .raw
+        case .jpg: return .jpg
         case .deleteUnmatchedRaw, .deleteOrphanJpg: return .cleanup
         }
     }
@@ -87,10 +86,8 @@ enum PhotoTask: String, CaseIterable, Identifiable {
         switch self {
         case .unmatchedRaw:         return "移出无同名 JPG 的 RAW"
         case .allRaw:               return "汇总全部 RAW"
-        case .matchedRawCurrent:    return "移出当前目录有同名 JPG 的 RAW"
-        case .matchedRawRecursive:  return "移出所有目录有同名 JPG 的 RAW"
-        case .jpgCurrent:           return "归集当前目录 JPG"
-        case .jpgRecursive:         return "归集所有目录 JPG"
+        case .matchedRaw:           return "移出有同名 JPG 的 RAW"
+        case .jpg:                  return "汇总全部JPG"
         case .deleteUnmatchedRaw:   return "删除无同名 JPG 的 RAW"
         case .deleteOrphanJpg:      return "删除无同名 RAW 的 JPG"
         }
@@ -100,42 +97,34 @@ enum PhotoTask: String, CaseIterable, Identifiable {
         switch self {
         case .unmatchedRaw:         return "arrow.right.circle"
         case .allRaw:               return "square.stack.3d.up"
-        case .matchedRawCurrent:    return "arrow.right.circle.fill"
-        case .matchedRawRecursive:  return "arrow.triangle.branch"
-        case .jpgCurrent:           return "square.on.square"
-        case .jpgRecursive:         return "square.stack"
+        case .matchedRaw:           return "arrow.right.circle.fill"
+        case .jpg:                  return "square.on.square"
         case .deleteUnmatchedRaw:   return "trash"
         case .deleteOrphanJpg:      return "trash.circle"
         }
     }
 
-    var detail: String {
+    func detail(includeSubfolders: Bool) -> String {
+        let scope = includeSubfolders ? "递归处理当前文件夹及其所有子文件夹" : "只处理当前文件夹（不含子文件夹）"
         switch self {
         case .unmatchedRaw:
-            return "逐个文件夹检查，把没有同名 JPG 的 RAW 移到该文件夹下的「无同名JPG的RAW」子目录。"
+            return "\(scope)：把没有同名 JPG 的 RAW 移到各自所在文件夹下的「无同名JPG的RAW」子目录。"
         case .allRaw:
-            return "递归扫描全部子文件夹，把找到的 RAW 复制一份到根目录的「全部RAW」，原文件保留不动。"
-        case .matchedRawCurrent:
-            return "只处理根目录，把有同名 JPG 的 RAW 移到「当前目录同名JPG的RAW」。"
-        case .matchedRawRecursive:
-            return "递归处理所有子文件夹，把有同名 JPG 的 RAW 统一移到根目录的「所有目录同名JPG的RAW」。"
-        case .jpgCurrent:
-            return "把根目录里的 JPG 移到「当前目录JPG」，不进入子文件夹。"
-        case .jpgRecursive:
-            return "递归扫描全部子文件夹，把 JPG 统一移到根目录的「所有目录JPG」。"
+            return "\(scope)：把找到的 RAW 复制一份到根目录的「全部RAW」，原文件保留不动。"
+        case .matchedRaw:
+            return "\(scope)：把有同名 JPG 的 RAW 移到目标目录。"
+        case .jpg:
+            return "\(scope)：把 JPG 移到目标目录。"
         case .deleteUnmatchedRaw:
-            return "递归扫描全部子文件夹，把没有同名 JPG 的 RAW 移到系统废纸篓（不是永久删除，可从废纸篓找回，也可在本软件撤销）。"
+            return "\(scope)：把没有同名 JPG 的 RAW 移到系统废纸篓（不是永久删除，可从废纸篓找回，也可在本软件撤销）。"
         case .deleteOrphanJpg:
-            return "递归扫描全部子文件夹，把没有同名 RAW 的 JPG 移到系统废纸篓（不是永久删除，可从废纸篓找回，也可在本软件撤销）。"
+            return "\(scope)：把没有同名 RAW 的 JPG 移到系统废纸篓（不是永久删除，可从废纸篓找回，也可在本软件撤销）。"
         }
     }
 
-    var scopeText: String {
-        switch self {
-        case .unmatchedRaw, .allRaw, .matchedRawRecursive, .jpgRecursive,
-             .deleteUnmatchedRaw, .deleteOrphanJpg: return "所有子文件夹"
-        case .matchedRawCurrent, .jpgCurrent: return "仅当前文件夹"
-        }
+    /// 范围说明文字，跟随全局开关变化
+    func scopeText(includeSubfolders: Bool) -> String {
+        includeSubfolders ? "包括子文件夹（递归）" : "仅当前文件夹（不含子文件夹）"
     }
 
     var actionText: String {
@@ -154,14 +143,13 @@ enum PhotoTask: String, CaseIterable, Identifiable {
         }
     }
 
-    var targetDirName: String {
+    /// 目标目录名：部分任务随范围开关切换，保持与旧版本目录名兼容
+    func targetDirName(includeSubfolders: Bool) -> String {
         switch self {
-        case .unmatchedRaw:         return "无同名JPG的RAW"
-        case .allRaw:               return "全部RAW"
-        case .matchedRawCurrent:    return "当前目录同名JPG的RAW"
-        case .matchedRawRecursive:  return "所有目录同名JPG的RAW"
-        case .jpgCurrent:           return "当前目录JPG"
-        case .jpgRecursive:         return "所有目录JPG"
+        case .unmatchedRaw: return "无同名JPG的RAW"
+        case .allRaw:       return "全部RAW"
+        case .matchedRaw:   return includeSubfolders ? "所有目录同名JPG的RAW" : "当前目录同名JPG的RAW"
+        case .jpg:          return includeSubfolders ? "所有目录JPG" : "当前目录JPG"
         case .deleteUnmatchedRaw, .deleteOrphanJpg: return "系统废纸篓"
         }
     }
@@ -170,13 +158,6 @@ enum PhotoTask: String, CaseIterable, Identifiable {
     var usesRootTarget: Bool {
         switch self {
         case .unmatchedRaw, .deleteUnmatchedRaw, .deleteOrphanJpg: return false
-        default: return true
-        }
-    }
-
-    var isRecursive: Bool {
-        switch self {
-        case .matchedRawCurrent, .jpgCurrent: return false
         default: return true
         }
     }
@@ -290,6 +271,11 @@ struct TransactionSummary: Identifiable {
 
 final class PhotoManager: ObservableObject {
     @Published var rootURL: URL?
+    /// 处理范围：默认包括子文件夹；关闭后所有任务只处理根目录（每个操作独立决定不重复枚举）。
+    /// 切换时立即按新范围重算统计，界面数字随勾选框实时刷新。
+    @Published var includeSubfolders = true {
+        didSet { recalcStats() }
+    }
     @Published var stats = LibraryStats()
     @Published var isScanning = false
     @Published var snapshots: [DirSnapshot] = []
@@ -325,11 +311,6 @@ final class PhotoManager: ObservableObject {
 
         let dirs = collectDirs(root: root)
         var result: [DirSnapshot] = []
-        var totalRaw = 0
-        var totalJpg = 0
-        var totalMatched = 0
-        var totalUnmatched = 0
-        var totalOrphanJpg = 0
 
         for dir in dirs {
             let files = filesIn(dir)
@@ -364,23 +345,31 @@ final class PhotoManager: ObservableObject {
                 unmatchedRaw: unmatched,
                 orphanJpg: orphanJpg
             ))
-            totalRaw += raws.count
-            totalJpg += jpgs.count
-            totalMatched += matched.count
-            totalUnmatched += unmatched.count
-            totalOrphanJpg += orphanJpg.count
         }
 
         snapshots = result
-        stats = LibraryStats(
-            dirCount: dirs.count,
-            rawCount: totalRaw,
-            jpgCount: totalJpg,
-            matchedRawCount: totalMatched,
-            unmatchedRawCount: totalUnmatched,
-            orphanJpgCount: totalOrphanJpg
-        )
+        recalcStats()
         logs = loadLogs()
+    }
+
+    /// 按当前范围（含/不含子文件夹）重新聚合概览统计。
+    /// 勾选框切换、扫描完成后都会调用，确保统计数字与处理范围一致。
+    private func recalcStats() {
+        guard let root = rootURL else {
+            stats = LibraryStats()
+            return
+        }
+        let dirs = scopedDirs(root: root)
+        var s = LibraryStats()
+        s.dirCount = dirs.count
+        for dir in dirs {
+            s.rawCount += dir.rawFiles.count
+            s.jpgCount += dir.jpgFiles.count
+            s.matchedRawCount += dir.matchedRaw.count
+            s.unmatchedRawCount += dir.unmatchedRaw.count
+            s.orphanJpgCount += dir.orphanJpg.count
+        }
+        stats = s
     }
 
     private func collectDirs(root: URL) -> [URL] {
@@ -432,15 +421,21 @@ final class PhotoManager: ObservableObject {
 
     // MARK: 预览
 
+    /// 按当前范围开关返回待处理的目录：关闭时只保留根目录。
+    private func scopedDirs(root: URL) -> [DirSnapshot] {
+        includeSubfolders ? snapshots : snapshots.filter { $0.url.path == root.path }
+    }
+
     func preview(for task: PhotoTask) -> [PreviewItem] {
         guard let root = rootURL else { return [] }
+        let dirs = scopedDirs(root: root)
+        let targetName = task.targetDirName(includeSubfolders: includeSubfolders)
         var items: [PreviewItem] = []
 
         switch task {
         case .unmatchedRaw:
-            for dir in snapshots {
-                guard !dir.unmatchedRaw.isEmpty else { continue }
-                let targetDir = dir.url.appendingPathComponent(task.targetDirName, isDirectory: true)
+            for dir in dirs {
+                let targetDir = dir.url.appendingPathComponent(targetName, isDirectory: true)
                 for file in dir.unmatchedRaw {
                     items.append(PreviewItem(
                         source: file.url,
@@ -451,62 +446,30 @@ final class PhotoManager: ObservableObject {
                 }
             }
 
-        case .allRaw:
-            let targetDir = root.appendingPathComponent(task.targetDirName, isDirectory: true)
-            for dir in snapshots {
-                for file in dir.rawFiles {
-                    items.append(PreviewItem(
-                        source: file.url,
-                        target: targetDir.appendingPathComponent(file.name),
-                        sourceDir: dir.url,
-                        isCopy: true
-                    ))
+        case .allRaw, .matchedRaw, .jpg:
+            let targetDir = root.appendingPathComponent(targetName, isDirectory: true)
+            for dir in dirs {
+                let files: [FileSnapshot]
+                switch task {
+                case .allRaw:     files = dir.rawFiles
+                case .matchedRaw: files = dir.matchedRaw
+                default:          files = dir.jpgFiles
                 }
-            }
-
-        case .matchedRawCurrent, .jpgCurrent:
-            guard let current = snapshots.first(where: { $0.url.path == root.path }) else { break }
-            let targetDir = root.appendingPathComponent(task.targetDirName, isDirectory: true)
-            let files = task == .matchedRawCurrent ? current.matchedRaw : current.jpgFiles
-            for file in files {
-                items.append(PreviewItem(
-                    source: file.url,
-                    target: targetDir.appendingPathComponent(file.name),
-                    sourceDir: current.url,
-                    isCopy: false
-                ))
-            }
-
-        case .matchedRawRecursive, .jpgRecursive:
-            let targetDir = root.appendingPathComponent(task.targetDirName, isDirectory: true)
-            for dir in snapshots {
-                let files = task == .matchedRawRecursive ? dir.matchedRaw : dir.jpgFiles
                 for file in files {
                     items.append(PreviewItem(
                         source: file.url,
                         target: targetDir.appendingPathComponent(file.name),
                         sourceDir: dir.url,
-                        isCopy: false
+                        isCopy: task == .allRaw
                     ))
                 }
             }
 
-        case .deleteUnmatchedRaw:
-            for dir in snapshots {
-                for file in dir.unmatchedRaw {
+        case .deleteUnmatchedRaw, .deleteOrphanJpg:
+            for dir in dirs {
+                let files = task == .deleteUnmatchedRaw ? dir.unmatchedRaw : dir.orphanJpg
+                for file in files {
                     // target 用源文件占位；删除任务不使用 target 做移动，仅用于预览展示
-                    items.append(PreviewItem(
-                        source: file.url,
-                        target: file.url,
-                        sourceDir: dir.url,
-                        isCopy: false
-                    ))
-                }
-            }
-
-        case .deleteOrphanJpg:
-            for dir in snapshots {
-                for file in dir.orphanJpg {
                     items.append(PreviewItem(
                         source: file.url,
                         target: file.url,
@@ -523,7 +486,10 @@ final class PhotoManager: ObservableObject {
     func targetURL(for task: PhotoTask) -> URL? {
         guard let root = rootURL else { return nil }
         if task.usesRootTarget {
-            return root.appendingPathComponent(task.targetDirName, isDirectory: true)
+            return root.appendingPathComponent(
+                task.targetDirName(includeSubfolders: includeSubfolders),
+                isDirectory: true
+            )
         }
         return nil
     }
@@ -571,7 +537,7 @@ final class PhotoManager: ObservableObject {
 
         result.targetURL = targetURL(for: task)
         let summary = result.failed == 0
-            ? "完成：\(task.actionText) \(result.succeeded) 个文件到「\(task.targetDirName)」"
+            ? "完成：\(task.actionText) \(result.succeeded) 个文件到「\(task.targetDirName(includeSubfolders: includeSubfolders))」（\(task.scopeText(includeSubfolders: includeSubfolders))）"
             : "完成：成功 \(result.succeeded) 个，失败 \(result.failed) 个"
         lastMessage = summary
         rescan()

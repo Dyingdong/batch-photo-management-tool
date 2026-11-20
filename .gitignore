@@ -1,3 +1,4 @@
 *.jsonl
 .DS_Store
 批量管理照片软件.app/
+*.zip

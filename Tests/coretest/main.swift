@@ -51,13 +51,14 @@ check(u1.restored == 4 && u1.failed == 0, "撤销恢复 4 项（2 移动 + 2 空
 check(exists("IMG_B.CR3"), "IMG_B.CR3 撤销后回到根目录")
 check(exists("sub/IMG_D.NEF"), "IMG_D.NEF 撤销后回到 sub")
 
-// 任务3：当前目录匹配 RAW
-let plan3 = mgr.preview(for: .matchedRawCurrent)
-check(plan3.count == 2, "任务3 当前目录匹配 RAW 2 个（A、C，大小写不敏感），实际 \(plan3.count)")
-let r3 = mgr.run(.matchedRawCurrent)
+// 任务3：有同名 JPG 的 RAW（范围开关默认开 = 含子文件夹）
+check(mgr.includeSubfolders, "范围开关默认包括子文件夹")
+let plan3 = mgr.preview(for: .matchedRaw)
+check(plan3.count == 2, "任务3 匹配 RAW 2 个（A、C，大小写不敏感），实际 \(plan3.count)")
+let r3 = mgr.run(.matchedRaw)
 check(r3.succeeded == 2, "任务3 成功 2 个，实际 \(r3.succeeded)")
-check(exists("当前目录同名JPG的RAW/IMG_A.CR3"), "IMG_A.CR3 进入匹配目录")
-check(exists("当前目录同名JPG的RAW/img_c.cr3"), "img_c.cr3 进入匹配目录")
+check(exists("所有目录同名JPG的RAW/IMG_A.CR3"), "IMG_A.CR3 进入匹配目录")
+check(exists("所有目录同名JPG的RAW/img_c.cr3"), "img_c.cr3 进入匹配目录")
 
 // 任务2：汇总全部 RAW（复制）—— 2 个匹配 RAW 已进入生成目录，会被跳过，剩 IMG_B + IMG_D
 let plan2 = mgr.preview(for: .allRaw)
@@ -66,6 +67,45 @@ let r2 = mgr.run(.allRaw)
 check(r2.succeeded == 2, "任务2 复制成功 2 个，实际 \(r2.succeeded)")
 check(exists("IMG_B.CR3"), "复制模式下原文件仍保留")
 check(exists("全部RAW/IMG_B.CR3"), "复制产物进入全部RAW目录")
+
+// ============ 范围开关测试（独立干净目录）============
+let suuid = UUID().uuidString.prefix(8)
+let rootS = URL(fileURLWithPath: NSTemporaryDirectory() + "BPMScopeTest-\(suuid)")
+try fm.createDirectory(at: rootS, withIntermediateDirectories: true)
+func touchS(_ rel: String) {
+    let url = rootS.appendingPathComponent(rel)
+    try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    fm.createFile(atPath: url.path, contents: Data("z".utf8))
+}
+func existsS(_ rel: String) -> Bool { fm.fileExists(atPath: rootS.appendingPathComponent(rel).path) }
+
+// 根目录 1 个无匹配 RAW，子目录 1 个无匹配 RAW / 1 个落单 JPG
+touchS("ROOT_RAW.CR3")
+touchS("sub/SUB_RAW.CR3")
+touchS("sub/SUB_SOLO.JPG")
+
+let mgrS = PhotoManager()
+mgrS.setRoot(rootS)
+
+// 默认含子文件夹：3 个任务都应看到子目录里的文件
+check(mgrS.preview(for: .unmatchedRaw).count == 2, "含子文件夹：无匹配 RAW 2 个（ROOT+SUB）")
+check(mgrS.preview(for: .deleteOrphanJpg).count == 1, "含子文件夹：落单 JPG 1 个（SUB_SOLO）")
+check(mgrS.stats.dirCount == 2 && mgrS.stats.rawCount == 2 && mgrS.stats.jpgCount == 1,
+      "含子文件夹统计：2 目录 / 2 RAW / 1 JPG，实际 \(mgrS.stats.dirCount)/\(mgrS.stats.rawCount)/\(mgrS.stats.jpgCount)")
+
+// 关闭范围：只看根目录（统计须随勾选框即时重算）
+mgrS.includeSubfolders = false
+check(mgrS.preview(for: .unmatchedRaw).count == 1, "仅当前文件夹：无匹配 RAW 1 个（仅 ROOT）")
+check(mgrS.preview(for: .deleteOrphanJpg).count == 0, "仅当前文件夹：落单 JPG 0 个（子目录被排除）")
+check(mgrS.targetURL(for: .matchedRaw)?.lastPathComponent == "当前目录同名JPG的RAW", "仅当前文件夹：目标目录名为当前目录版")
+check(mgrS.stats.dirCount == 1 && mgrS.stats.rawCount == 1 && mgrS.stats.jpgCount == 0 && mgrS.stats.orphanJpgCount == 0,
+      "关闭范围后统计重算：1 目录 / 1 RAW / 0 JPG，实际 \(mgrS.stats.dirCount)/\(mgrS.stats.rawCount)/\(mgrS.stats.jpgCount)")
+
+mgrS.includeSubfolders = true
+check(mgrS.targetURL(for: .matchedRaw)?.lastPathComponent == "所有目录同名JPG的RAW", "含子文件夹：目标目录名为所有目录版")
+check(mgrS.stats.dirCount == 2 && mgrS.stats.rawCount == 2 && mgrS.stats.jpgCount == 1,
+      "重新勾选后统计恢复：2 目录 / 2 RAW / 1 JPG，实际 \(mgrS.stats.dirCount)/\(mgrS.stats.rawCount)/\(mgrS.stats.jpgCount)")
+try? fm.removeItem(at: rootS)
 
 // ============ 删除任务测试（独立干净目录）============
 let uuid = UUID().uuidString.prefix(8)

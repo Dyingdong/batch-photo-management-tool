@@ -62,7 +62,7 @@ struct BatchPhotoManagerApp: App {
 
 struct ContentView: View {
     @EnvironmentObject var store: PhotoManager
-    @State private var selectedTask: PhotoTask? = .unmatchedRaw
+    @State private var selectedTask: PhotoTask? = .matchedRaw
     @State private var confirmTask: PhotoTask?
     @State private var showUndoConfirm = false
     @State private var result: OperationResult?
@@ -72,6 +72,8 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             TopBar(selectedTask: $selectedTask, showUndoConfirm: $showUndoConfirm)
+            Divider()
+            ScopeBar()
             Divider()
             OverviewBar()
             Divider()
@@ -130,7 +132,7 @@ struct ContentView: View {
             let resolved = url.resolvingSymlinksInPath().standardizedFileURL
             DispatchQueue.main.async {
                 store.setRoot(resolved)
-                selectedTask = .unmatchedRaw
+                selectedTask = .matchedRaw
             }
         }
         return true
@@ -211,7 +213,7 @@ struct TopBar: View {
             Button {
                 if let url = DirectoryPicker.pick() {
                     store.setRoot(url)
-                    selectedTask = .unmatchedRaw
+                    selectedTask = .matchedRaw
                 }
             } label: {
                 Label(store.rootURL == nil ? "选择文件夹" : "更换文件夹", systemImage: "folder.badge.plus")
@@ -224,6 +226,54 @@ struct TopBar: View {
     }
 }
 
+// MARK: - 处理范围（全局开关：包括子文件夹 / 仅当前文件夹）
+
+struct ScopeBar: View {
+    @EnvironmentObject var store: PhotoManager
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "folder.badge.gearshape")
+                .font(.system(size: 13))
+                .foregroundColor(Token.textTertiary)
+
+            Toggle(isOn: $store.includeSubfolders) {
+                HStack(spacing: 8) {
+                    Text("包括子文件夹")
+                        .font(.system(size: 13, weight: .medium))
+                    Text(store.includeSubfolders
+                         ? "当前文件夹及其所有子文件夹"
+                         : "仅当前文件夹（不含子文件夹）")
+                        .font(.system(size: 11))
+                        .foregroundColor(store.includeSubfolders ? Token.textSecondary : Token.warning)
+                }
+            }
+            .toggleStyle(.checkbox)
+            .disabled(store.rootURL == nil)
+            .help("勾选：递归处理所有子文件夹；不勾选：只处理当前文件夹")
+
+            Spacer()
+
+            // 当前生效范围的状态标签，标清包不包含子文件夹
+            HStack(spacing: 5) {
+                Image(systemName: store.includeSubfolders ? "square.stack.3d.down.right" : "square")
+                    .font(.system(size: 10))
+                Text(store.includeSubfolders ? "含子文件夹" : "仅当前文件夹")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundColor(store.includeSubfolders ? Token.primary : Token.warning)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(store.includeSubfolders ? Token.primary.opacity(0.08) : Token.warning.opacity(0.10))
+            .cornerRadius(Token.radiusTag)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(Token.card)
+        .opacity(store.rootURL == nil ? 0.55 : 1.0)
+    }
+}
+
 // MARK: - 概览条
 
 struct OverviewBar: View {
@@ -231,18 +281,18 @@ struct OverviewBar: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            MetricCard(title: "扫描文件夹", value: "\(store.stats.dirCount)", unit: "个", icon: "folder", tone: .neutral)
-            MetricCard(title: "RAW 文件", value: "\(store.stats.rawCount)", unit: "个", icon: "camera.aperture", tone: .neutral)
-            MetricCard(title: "JPG 文件", value: "\(store.stats.jpgCount)", unit: "个", icon: "photo", tone: .neutral)
+            MetricCard(title: "文件夹总数", value: "\(store.stats.dirCount)", unit: "个", icon: "folder", tone: .neutral)
+            MetricCard(title: "RAW 总数", value: "\(store.stats.rawCount)", unit: "个", icon: "camera.aperture", tone: .neutral)
+            MetricCard(title: "JPG 总数", value: "\(store.stats.jpgCount)", unit: "个", icon: "photo", tone: .neutral)
             MetricCard(
-                title: "无匹配 JPG 的 RAW",
+                title: "其中包含：无匹配 JPG 的 RAW",
                 value: "\(store.stats.unmatchedRawCount)",
                 unit: "个",
                 icon: "exclamationmark.triangle",
                 tone: store.stats.unmatchedRawCount > 0 ? .warning : .neutral
             )
             MetricCard(
-                title: "有匹配 JPG 的 RAW",
+                title: "其中包含：有匹配 JPG 的 RAW",
                 value: "\(store.stats.matchedRawCount)",
                 unit: "个",
                 icon: "checkmark.circle",
@@ -267,15 +317,18 @@ struct MetricCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
                 Image(systemName: icon)
                     .font(.system(size: 11))
                     .foregroundColor(toneColor)
+                    .padding(.top, 1)
                 Text(title)
                     .font(.system(size: 12))
                     .foregroundColor(Token.textSecondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(height: 32, alignment: .top)
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(value)
                     .font(.system(size: 22, weight: .semibold))
@@ -315,6 +368,16 @@ struct TaskSidebar: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                // 统一标注当前处理范围，避免每个功能重复写「当前/所有目录」
+                HStack(spacing: 5) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 10))
+                    Text("范围：\(store.includeSubfolders ? "含子文件夹" : "仅当前文件夹")")
+                        .font(.system(size: 10))
+                }
+                .foregroundColor(store.includeSubfolders ? Token.primary : Token.warning)
+                .padding(.horizontal, 10)
+
                 ForEach(TaskGroup.allCases) { group in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(group.title.uppercased())
@@ -477,7 +540,7 @@ struct DetailContent: View {
                             Text(task.title)
                                 .font(.system(size: 18, weight: .semibold))
                         }
-                        Text(task.detail)
+                        Text(task.detail(includeSubfolders: store.includeSubfolders))
                             .font(.system(size: 13))
                             .foregroundColor(Token.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -485,10 +548,13 @@ struct DetailContent: View {
 
                     // 标签区
                     HStack(spacing: 8) {
-                        InfoTag(icon: "folder", text: "范围：\(task.scopeText)")
+                        InfoTag(icon: "folder",
+                                text: "范围：\(task.scopeText(includeSubfolders: store.includeSubfolders))",
+                                danger: !store.includeSubfolders)
                         InfoTag(icon: task.isTrashTask ? "trash" : "arrow.right",
                                 text: "动作：\(task.actionText)", danger: task.isTrashTask)
-                        InfoTag(icon: "square.stack", text: "目标：\(task.targetDirName)")
+                        InfoTag(icon: "square.stack",
+                                text: "目标：\(task.targetDirName(includeSubfolders: store.includeSubfolders))")
                     }
 
                     // 影响概览
@@ -593,7 +659,7 @@ struct DetailContent: View {
         if let url = store.targetURL(for: task) {
             return url.path
         }
-        return "各源文件夹下的「\(task.targetDirName)」子目录"
+        return "各源文件夹下的「\(task.targetDirName(includeSubfolders: store.includeSubfolders))」子目录"
     }
 }
 

@@ -2,8 +2,9 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 APP="$ROOT/批量管理照片软件.app"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT/App/Info.plist" "$APP/Contents/Info.plist"
+cp "$ROOT/App/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 FLAGS=(-O -swift-version 5 -target arm64-apple-macosx13.0)
 
